@@ -58,8 +58,9 @@ cd processing && ../.venv-py/bin/python -m nisar_change \
   --before 2026-10-25 --after 2026-11-06 --pol HV --out out/
 ```
 
-Tests: `cd processing && ../.venv-py/bin/python -m pytest tests/`
-and `node scripts/test-api.mjs` for the Gemini endpoint.
+Tests: `cd processing && ../.venv-py/bin/python -m pytest tests/`,
+`node scripts/test-api.mjs` for the Gemini endpoint and
+`node scripts/test-georef.mjs` for the derived-georeferencing maths.
 
 ## Live mode vs prepared demonstration
 
