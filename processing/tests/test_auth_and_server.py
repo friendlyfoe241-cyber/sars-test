@@ -132,3 +132,25 @@ def test_unknown_analysis_404(api_server):
 def test_artifact_path_traversal_blocked(api_server):
     res = requests.get(f"{api_server}/api/artifacts/x/..%2F..%2Fserve.py", timeout=10)
     assert res.status_code in (400, 404)
+
+
+def test_static_app_served(api_server):
+    res = requests.get(f"{api_server}/", timeout=10)
+    assert res.status_code == 200
+    assert "text/html" in res.headers["Content-Type"]
+    # SPA fallback: unknown paths return the app shell
+    res = requests.get(f"{api_server}/some/page", timeout=10)
+    assert res.status_code == 200
+
+
+def test_static_traversal_blocked(api_server):
+    """A raw traversal request must never return source files."""
+    import socket
+
+    host, port = api_server.rsplit(":", 1)
+    with socket.create_connection((host.removeprefix("http://"), int(port)), timeout=10) as s:
+        s.sendall(b"GET /../processing/serve.py HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        data = b""
+        while chunk := s.recv(65536):
+            data += chunk
+    assert b"ThreadingHTTPServer" not in data  # serve.py source must not leak

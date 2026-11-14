@@ -4,6 +4,7 @@ import { isAbortError } from "./lib/abort";
 import AnalysisPanel, { type AnalysisState } from "./components/AnalysisPanel";
 import {
   AnalysisError,
+  analysisBase,
   submitAnalysis,
   waitForAnalysis,
   type AnalysisResult,
@@ -646,10 +647,7 @@ export default function App() {
     };
     setAiEntry({ key, state: { status: "loading" } });
     try {
-      const res = await fetch("/api/explain-change", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const payload = JSON.stringify({
           studyArea: {
             name: viewer.areaLabel,
             country: "",
@@ -672,8 +670,21 @@ export default function App() {
           // calibrated results from the processing pipeline, when this
           // selection has completed one (trimmed to the facts the model may use)
           analysis: analysisFacts(analysis.job?.result),
-        }),
-      });
+        });
+      // Vercel serves the endpoint same-origin; static hosting falls back to
+      // the analysis worker, which exposes the same endpoint.
+      let res = await fetch("/api/explain-change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).catch(() => null);
+      if (!res || res.status === 404) {
+        res = await fetch(`${analysisBase()}/api/explain-change`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+        });
+      }
       const body = await res.json().catch(() => null);
       if (!res.ok) {
         settle({

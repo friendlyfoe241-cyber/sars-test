@@ -27,7 +27,7 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from nisar_change import events
+from nisar_change import auth, events
 from nisar_change.auth import auth_summary
 from nisar_change.config import AnalysisRequest, DIRECTIONS, POLARISATIONS, Thresholds
 from nisar_change.errors import (DiscoveryError, IncompatibleDataError, InvalidRequestError,
@@ -36,7 +36,10 @@ from nisar_change.errors import (DiscoveryError, IncompatibleDataError, InvalidR
 from nisar_change.pipeline import run_analysis
 from nisar_change.schema import build_result
 
+import explain as explain_service
+
 BASE = Path(__file__).resolve().parent
+DIST_DIR = BASE.parent / "dist"
 OUT_DIR = BASE / "out"
 CACHE_DIR = BASE / "cache"
 MAX_BODY = 64 * 1024
@@ -215,7 +218,33 @@ class Handler(BaseHTTPRequestHandler):
         if parts[:2] == ["api", "artifacts"] and len(parts) == 4:
             self._serve_artifact(parts[2], parts[3])
             return
-        self._error(404, "not found")
+        if parts and parts[0] == "api":
+            self._error(404, "not found")
+            return
+        self._serve_static(parts)
+
+    STATIC_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript",
+                    ".css": "text/css", ".json": "application/json", ".png": "image/png",
+                    ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon",
+                    ".woff2": "font/woff2"}
+
+    def _serve_static(self, parts: list[str]) -> None:
+        """Serve the built web app (dist/) with an SPA fallback to index.html."""
+        if not DIST_DIR.is_dir():
+            self._error(404, "frontend not built (run `npm run build`)")
+            return
+        name = "/".join(parts) or "index.html"
+        if not all(SAFE_NAME.match(p) for p in parts):
+            self._error(400, "invalid path")
+            return
+        path = (DIST_DIR / name).resolve()
+        if DIST_DIR.resolve() not in path.parents:
+            self._error(400, "invalid path")
+            return
+        if not path.is_file():
+            path = DIST_DIR / "index.html"  # SPA fallback
+        self._send(200, content_type=self.STATIC_TYPES.get(path.suffix, "application/octet-stream"),
+                   body=path.read_bytes())
 
     def _serve_artifact(self, job_id: str, name: str) -> None:
         if not SAFE_NAME.match(job_id) or (name and not SAFE_NAME.match(name)):
@@ -241,6 +270,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parts = [p for p in self.path.split("?")[0].split("/") if p]
+        if parts[:2] == ["api", "explain-change"] and len(parts) == 2:
+            self._handle_explain()
+            return
         if parts[:2] != ["api", "analyze"] or len(parts) != 2:
             self._error(404, "not found")
             return
@@ -265,12 +297,31 @@ class Handler(BaseHTTPRequestHandler):
         self._send(202, {"analysisId": job.id, "status": job.status,
                          "statusUrl": f"/api/analyze/{job.id}"})
 
+    def _handle_explain(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0 or length > MAX_BODY:
+            self._error(400, "request body missing or too large")
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except ValueError:
+            self._error(400, "request body is not valid JSON")
+            return
+        try:
+            self._send(200, explain_service.explain(body))
+        except explain_service.ExplainError as exc:
+            self._error(exc.status, str(exc))
+        except Exception:
+            traceback.print_exc()
+            self._error(500, "Unexpected server error.")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="NISAR analysis API")
     parser.add_argument("--port", type=int, default=8788)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
+    auth.load_credentials()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((args.host, args.port), Handler)

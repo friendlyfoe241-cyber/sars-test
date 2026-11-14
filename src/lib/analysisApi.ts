@@ -106,14 +106,14 @@ export interface ServiceHealth {
   events: string[];
 }
 
-/** Default to the local processing server; VITE_ANALYSIS_API overrides it. */
-const BASE = (import.meta.env.VITE_ANALYSIS_API as string | undefined) ?? "http://127.0.0.1:8788";
+/** Same origin by default (the Python server hosts the app in production and
+ * the Vite dev server proxies /api in development); VITE_ANALYSIS_API points
+ * at a worker on another host (e.g. Vercel + remote pipeline). */
+const BASE = (import.meta.env.VITE_ANALYSIS_API as string | undefined) ?? "";
 
-export function analysisServiceConfigured(): boolean {
-  return Boolean(BASE);
-}
-
-export function analysisServiceLabel(): string {
+/** Base URL of the analysis worker (also hosts /api/explain-change when the
+ * frontend is served statically).  Empty = same origin. */
+export function analysisBase(): string {
   return BASE;
 }
 

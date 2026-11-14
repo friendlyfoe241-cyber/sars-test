@@ -24,13 +24,12 @@ Two layers:
 
 ```bash
 npm install
-npm run dev            # web app on http://localhost:5173
+npm run dev            # web app on http://localhost:5173 (proxies /api to :8788)
 ```
 
-For the full experience (Gemini endpoint), run with the Vercel CLI:
-`vercel dev`. The app is usable without any server: discovery and the
-quicklook comparison need no credentials. The prepared demonstration dataset
-(Tonj floodplain wetlands, South Sudan) is available from the *Example* button.
+Start the analysis server (`processing/serve.py`, see below) for the
+`/api` endpoints. The prepared demonstration dataset (Tonj floodplain
+wetlands, South Sudan) is available from the *Example* button.
 
 ## Calibrated analysis (Python pipeline)
 
@@ -98,13 +97,21 @@ No Supabase or database is used; no SQL setup is necessary. Never commit
 
 ## Deployment
 
-- **Web app + Gemini**: import the repository in Vercel (Vite preset); set
-  `GEMINI_API_KEY` in project settings.
-- **Analysis pipeline**: runs as a worker (`processing/serve.py`) on any
-  server or locally; set `NASA_EARTHDATA_BEARER_TOKEN` as a server-side
-  secret in its environment and point `VITE_ANALYSIS_API` at it when
-  building the frontend. Serverless functions are not suitable for Harmony
-  jobs (minutes-long, large downloads); keep the pipeline as a worker.
+**Render (everything in one service).** The repository contains a
+`render.yaml` blueprint: create a *Blueprint* instance from the repository (or
+a *Web Service* with the same settings) — build `npm ci && npm run build &&
+pip install -r processing/requirements.txt`, start `python
+processing/serve.py --host 0.0.0.0 --port $PORT`, health check `/api/health`.
+The Python server hosts the built web app, the analysis API and the
+`/api/explain-change` endpoint.  Set `NASA_EARTHDATA_BEARER_TOKEN` and
+`GEMINI_API_KEY` as service secrets.
+
+**Vercel (web + Gemini) + separate worker.** Import the repository in Vercel
+(Vite preset) with `GEMINI_API_KEY` set; run `processing/serve.py` on any
+Python host with `NASA_EARTHDATA_BEARER_TOKEN` and set `VITE_ANALYSIS_API` to
+that worker's public HTTPS URL, then redeploy.  Serverless functions are not
+suitable for Harmony jobs (minutes-long, large downloads); keep the pipeline
+as a worker.
 
 ## Known limitations
 
