@@ -1,0 +1,887 @@
+/* Vortex design tokens and the primitives the content components use
+ * (buttons, fields, segments, sections, notices ...).  Surfaces are glass
+ * (see glass.css); everything here sits ON glass, so fills are translucent
+ * white and borders are hairlines.  No orange in the chrome: the amber
+ * "increase" colour is scientific data encoding only (legend, map, graph). */
+
+:root {
+  color-scheme: dark;
+  --vx-bg: #000000;
+  --vx-surface: rgba(255, 255, 255, 0.06);
+  --vx-surface-raised: rgba(255, 255, 255, 0.1);
+  --vx-surface-hover: rgba(255, 255, 255, 0.17);
+  --vx-text: #f2f4f7;
+  --vx-text-muted: #c3cbd8; /* >= 7:1 on the dark glass scrim */
+  --vx-text-subtle: #a3adbd; /* >= 5:1 on the dark glass scrim */
+  --vx-accent: #4f46e5; /* fill behind white text (6.3:1) */
+  --vx-accent-2: #6d4ce0;
+  --vx-on-accent: #ffffff;
+  --vx-flare: #9db8ff; /* accent as text */
+  --vx-cyan: #7cc4ff;
+  --vx-violet: #9d74f0;
+  --vx-border: rgba(255, 255, 255, 0.16);
+  --vx-control-border: rgba(255, 255, 255, 0.36);
+  --vx-focus: #9db8ff;
+  --vx-success: #86e3b5;
+  --vx-warning: #d4bcff; /* violet-tinted, not amber */
+  --vx-error: #ff9aa6;
+  /* series for non-change data (graphs): cyan, violet */
+  --vx-series-1: var(--vx-cyan);
+  --vx-series-2: var(--vx-violet);
+  /* scientific encoding of change direction: leave alone */
+  --vx-data-decrease: #68c5eb;
+  --vx-data-neutral: #bec9d2;
+  --vx-data-increase: #f3b85a;
+  /* the workspace display face; .vx-hero (index.css) swaps in Metamorphous */
+  --vx-font-display: "Sora Variable", "Sora", ui-sans-serif, system-ui, sans-serif;
+  --vx-font-body: "Sora Variable", "Sora", ui-sans-serif, system-ui, sans-serif;
+  /* numbers and dates stay in Sora with tabular figures; real monospace is
+     only used for product ids (Tailwind font-mono). */
+  --vx-font-mono: var(--vx-font-body);
+  --vx-font-code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --vx-shadow: 0 16px 48px rgb(0 0 0 / 45%);
+  --vx-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --vx-control-h: 44px;
+}
+
+.vx-mono {
+  font-family: var(--vx-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.vx-eyebrow {
+  font: 600 11px/16px var(--vx-font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vx-flare);
+}
+.font-mono {
+  font-family: var(--vx-font-code);
+  font-size: 0.92em;
+}
+
+/* ---- buttons ----------------------------------------------------------- */
+.vx-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--vx-control-h);
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: inset 1.5px 1.5px 0 rgba(255, 255, 255, 0.3);
+  color: var(--vx-text);
+  font: 500 14px/1.2 var(--vx-font-display);
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform var(--vx-dur) var(--vx-ease);
+}
+.vx-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.17);
+}
+.vx-button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.vx-button--primary {
+  background: linear-gradient(135deg, #4f46e5, #6d4ce0);
+  color: var(--vx-on-accent);
+  box-shadow:
+    inset 1px 1.5px 0 rgba(255, 255, 255, 0.4),
+    0 6px 20px rgba(99, 102, 241, 0.4);
+}
+.vx-button--primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5b53ee, #7a59ea);
+}
+.vx-button--ghost {
+  background: transparent;
+  box-shadow: none;
+}
+.vx-button--ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+.vx-button--block {
+  width: 100%;
+}
+.vx-button--compact {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.vx-button[aria-pressed="true"]:not(.vx-button--primary) {
+  background: rgba(157, 184, 255, 0.22);
+  box-shadow: inset 0 0 0 1.5px var(--vx-flare);
+}
+.vx-button:disabled {
+  color: var(--vx-text-subtle);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.vx-button--primary:disabled {
+  background: rgba(79, 70, 229, 0.35);
+  color: #d6d9ff;
+}
+
+/* ---- fields ------------------------------------------------------------- */
+.vx-field {
+  display: grid;
+  gap: 8px;
+}
+.vx-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--vx-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.vx-input {
+  min-width: 0;
+  width: 100%;
+  min-height: var(--vx-control-h);
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--vx-text);
+  border: 1px solid var(--vx-control-border);
+  border-radius: 14px;
+  font-size: 14px;
+}
+.vx-input::placeholder {
+  color: var(--vx-text-subtle);
+}
+.vx-input[aria-invalid="true"] {
+  border-color: var(--vx-error);
+}
+.vx-input:focus-visible {
+  outline-offset: 1px;
+}
+@media (max-width: 767px) {
+  .vx-input {
+    font-size: 16px;
+  }
+}
+.vx-select {
+  appearance: none;
+  padding-right: 34px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--vx-text-muted) 50%),
+    linear-gradient(135deg, var(--vx-text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 19px) 50%,
+    calc(100% - 14px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* ---- segmented controls -------------------------------------------------- */
+.vx-segment-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.vx-segment {
+  min-height: var(--vx-control-h);
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--vx-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+.vx-segment:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--vx-text);
+}
+.vx-segment[aria-pressed="true"],
+.vx-segment[aria-selected="true"] {
+  background: linear-gradient(135deg, #4f46e5, #6d4ce0);
+  color: var(--vx-on-accent);
+  box-shadow:
+    inset 1px 1.5px 0 rgba(255, 255, 255, 0.4),
+    0 4px 14px rgba(99, 102, 241, 0.35);
+}
+.vx-segment:disabled {
+  color: var(--vx-text-subtle);
+  cursor: not-allowed;
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 255, 255, 0.25);
+}
+.vx-segment-group--fill {
+  flex-wrap: nowrap;
+}
+.vx-segment-group--fill .vx-segment {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 4px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* ---- sections, notes, key/value ----------------------------------------- */
+.vx-section {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--vx-border);
+}
+.vx-section:last-child {
+  border-bottom: 0;
+}
+.vx-section--disclosure {
+  padding-block: 4px;
+}
+.vx-section__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 10px;
+  font: 600 11px/16px var(--vx-font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vx-flare);
+}
+.vx-section__title--button {
+  margin: 0;
+}
+.vx-section__title--button > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--vx-control-h);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vx-section__title--button > button:hover {
+  color: var(--vx-text);
+}
+.vx-section__summary {
+  margin-left: auto;
+  font-family: var(--vx-font-body);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--vx-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vx-section__body {
+  padding: 4px 0 12px;
+}
+.vx-note {
+  margin: 0;
+  color: var(--vx-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.vx-note + .vx-note {
+  margin-top: 8px;
+}
+.vx-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+.vx-kv {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.vx-kv__label,
+.vx-kv__value {
+  padding: 8px 10px;
+  min-width: 0;
+}
+.vx-kv__label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: 12px 4px 4px 12px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--vx-text-muted);
+}
+.vx-kv__label svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--vx-flare);
+}
+.vx-kv__value {
+  border-radius: 4px 12px 12px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.vx-kv--stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+.vx-kv--stack .vx-kv__label {
+  border-radius: 12px 12px 4px 4px;
+}
+.vx-kv--stack .vx-kv__value {
+  text-align: left;
+  border-radius: 4px 4px 12px 12px;
+}
+
+/* ---- status notices ------------------------------------------------------ */
+.vx-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 1.5px 1.5px 0 rgba(255, 255, 255, 0.16);
+}
+.vx-notice[data-tone="error"] {
+  background: rgba(255, 120, 140, 0.12);
+  box-shadow: inset 1.5px 1.5px 0 rgba(255, 154, 166, 0.45);
+}
+.vx-notice[data-tone="warn"] {
+  background: rgba(157, 116, 240, 0.16);
+  box-shadow: inset 1.5px 1.5px 0 rgba(212, 188, 255, 0.4);
+}
+.vx-notice[data-tone="ok"] {
+  background: rgba(134, 227, 181, 0.1);
+  box-shadow: inset 1.5px 1.5px 0 rgba(134, 227, 181, 0.35);
+}
+.vx-notice[data-tone="busy"] {
+  background: rgba(124, 196, 255, 0.1);
+  box-shadow: inset 1.5px 1.5px 0 rgba(124, 196, 255, 0.35);
+}
+.vx-notice h3 {
+  margin: 0;
+  font: 600 14px/20px var(--vx-font-display);
+}
+.vx-notice p {
+  margin: 0;
+  color: var(--vx-text-muted);
+  font-size: 12.5px;
+  line-height: 19px;
+}
+.vx-notice__icon {
+  grid-row: span 2;
+  margin-top: 3px;
+  color: var(--vx-flare);
+}
+.vx-notice[data-tone="error"] .vx-notice__icon {
+  color: var(--vx-error);
+}
+.vx-notice[data-tone="ok"] .vx-notice__icon {
+  color: var(--vx-success);
+}
+.vx-notice[data-tone="warn"] .vx-notice__icon {
+  color: var(--vx-warning);
+}
+.vx-notice__action {
+  grid-column: 2;
+  margin-top: 8px;
+}
+
+.vx-spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: var(--vx-flare);
+  border-radius: 50%;
+  animation: vx-spin 0.9s linear infinite;
+}
+
+.vx-checker {
+  background-color: #2a2d36;
+  background-image:
+    linear-gradient(45deg, #4a4f5c 25%, transparent 25%, transparent 75%, #4a4f5c 75%),
+    linear-gradient(45deg, #4a4f5c 25%, transparent 25%, transparent 75%, #4a4f5c 75%);
+  background-size: 8px 8px;
+  background-position:
+    0 0,
+    4px 4px;
+}
+
+/* ---- page frame ------------------------------------------------------------
+ * The workspace is a frame filling the viewport: the header pill on top and
+ * below it ONE page per step.  Each page is a grid; the map is a region of
+ * that grid (an empty [data-map-slot] cell the persistent .vx-stage is laid
+ * over, see MapStage.tsx).  Content regions scroll inside themselves; the
+ * frame never scrolls.
+ *
+ *   < 1024px (or short landscape)   head / map / scrolling content column
+ *   short landscape >= 640px         head / map | scrolling content column
+ *   >= 1024 x 720                    per-step grid (below)                    */
+.vx-frame {
+  --vx-page-travel: 96px;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.vx-frame__head {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  padding: 16px 16px 0;
+}
+.vx-frame__body {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.vx-page {
+  --vx-gap: 16px;
+  --vx-map-h: clamp(280px, 50vh, 560px);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: var(--vx-gap);
+  padding: var(--vx-gap);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto var(--vx-map-h) minmax(0, 1fr);
+  grid-template-areas: "head" "map" "content";
+}
+.vx-page[data-locked] {
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "head" "content";
+}
+.vx-page__head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding-inline: 4px;
+}
+.vx-page__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  color: var(--vx-flare);
+  background: rgba(79, 70, 229, 0.18);
+  box-shadow: inset 1px 1px 0 rgba(157, 184, 255, 0.35);
+}
+.vx-page__blurb {
+  margin: 0;
+  overflow: hidden;
+  color: var(--vx-text-muted);
+  font-size: 12.5px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vx-page__map {
+  grid-area: map;
+  min-width: 0;
+  min-height: 0;
+}
+.vx-page__content {
+  grid-area: content;
+  display: flex;
+  flex-direction: column;
+  gap: var(--vx-gap);
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+.vx-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vx-gap);
+  min-width: 0;
+  min-height: 0;
+}
+.vx-step-heading {
+  display: inline-block;
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 26px;
+  letter-spacing: -0.005em;
+  outline: none;
+}
+.vx-step-heading:focus-visible {
+  outline: 2px solid var(--vx-focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* glass panels of a page */
+.vx-panel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 28px;
+}
+.vx-panel > .lg-c {
+  display: flex !important;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.vx-panel__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 6px 12px 2px 20px;
+  border-bottom: 1px solid var(--vx-border);
+}
+.vx-panel__title {
+  margin: 0;
+  font: 600 11px/16px var(--vx-font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vx-flare);
+}
+.vx-panel__meta {
+  color: var(--vx-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.vx-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.vx-panel__body:not(.vx-scroll) {
+  display: flex;
+  flex-direction: column;
+}
+/* stacked pages: tables and the graph get a sensible own height */
+.vx-panel--table .vx-instr-scroll {
+  max-height: 70vh;
+}
+.vx-panel--graph {
+  height: 340px;
+}
+
+/* suggested pairs */
+.vx-pair-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 8px;
+}
+.vx-pair-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.vx-pair-card[aria-current] {
+  box-shadow: inset 0 0 0 1.5px var(--vx-flare);
+}
+
+/* a locked step: one centred card on an otherwise empty page */
+.vx-empty {
+  display: grid;
+  flex: 1 0 auto;
+  place-items: center;
+  padding-block: 8px;
+}
+.vx-empty__card {
+  width: min(560px, 100%);
+  border-radius: 32px;
+}
+
+/* the map stage: a rounded, glass-framed box laid over the page's map slot */
+.vx-stage {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 28px;
+  background: #04050b;
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+.vx-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1100;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 1.5px 1.5px 0 rgba(255, 255, 255, 0.32),
+    inset -1px -1px 0 rgba(255, 255, 255, 0.08);
+}
+.vx-stage[data-hidden="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+.vx-stage__expand {
+  position: absolute;
+  z-index: 1000;
+  left: 12px;
+  bottom: 12px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--vx-text);
+  cursor: pointer;
+}
+.vx-stage__expand > .lg-c {
+  display: grid !important;
+  place-items: center;
+  height: 100%;
+}
+.vx-stage__expand[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--vx-flare);
+}
+
+@media (max-width: 767px) {
+  .vx-frame__head {
+    padding: 12px 12px 0;
+  }
+  .vx-page {
+    --vx-gap: 12px;
+    --vx-map-h: clamp(200px, 42vh, 420px);
+  }
+  .vx-page__icon {
+    display: none;
+  }
+  .vx-page__blurb {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+}
+
+/* short landscape screens: map on the left at full height, content beside it */
+@media (min-width: 640px) and (max-height: 719px) and (orientation: landscape) {
+  .vx-page {
+    --vx-gap: 12px;
+    grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "head head" "map content";
+  }
+  .vx-page[data-locked] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "head" "content";
+  }
+}
+
+/* desktop: every step has its own composition around the map */
+@media (min-width: 1024px) and (min-height: 720px) {
+  .vx-page {
+    padding: 16px 20px 20px;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .vx-page__content {
+    display: contents;
+  }
+  /* (outranks the per-step compositions below) */
+  .vx-page[data-locked][data-step] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "head" "content";
+  }
+  .vx-page[data-locked] .vx-page__content {
+    display: flex;
+  }
+  .vx-panel--table .vx-instr-scroll {
+    max-height: none;
+  }
+  .vx-panel--graph {
+    height: auto;
+  }
+  .vx-panel--grow {
+    flex: 1 1 auto;
+  }
+  /* map ~70% | search controls */
+  .vx-page[data-step="locate"] {
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 30vw, 420px);
+    grid-template-areas: "head head" "map side";
+  }
+  /* map ~45% over the scene details | observations table, full height */
+  .vx-page[data-step="scenes"] {
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    grid-template-rows: auto minmax(280px, 1.2fr) minmax(0, 1fr);
+    grid-template-areas: "head head" "map table" "info table";
+  }
+  /* pairs and the manual choice | map with the two footprints */
+  .vx-page[data-step="pairs"] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "head head" "list map";
+  }
+  /* map ~70% with the divider | display controls */
+  .vx-page[data-step="change"] {
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 400px);
+    grid-template-areas: "head head" "map side";
+  }
+  /* map ~40% over the explanation | results table over the graph */
+  .vx-page[data-step="explain"] {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    grid-template-rows: auto minmax(280px, 1fr) minmax(0, 1fr);
+    grid-template-areas: "head head" "map results" "ai graph";
+  }
+}
+
+/* phones: the map can take the whole page (and back) */
+.vx-page[data-map-expanded] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "head" "map";
+}
+.vx-page[data-map-expanded] .vx-page__content {
+  display: none;
+}
+
+/* 44px square icon buttons (legend fold) */
+.vx-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--vx-text-muted);
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+.vx-icon-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--vx-text);
+}
+.vx-rail-indicator {
+  transition: transform var(--vx-dur) var(--vx-ease);
+}
+
+/* ---- scrollers ---------------------------------------------------------------- */
+.vx-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
+/* ---- map furniture ---------------------------------------------------------- */
+.vx-map {
+  position: absolute;
+  inset: 0;
+  isolation: isolate;
+}
+.vx-leaflet {
+  position: absolute;
+  inset: 0;
+}
+/* Legend: bottom-left of the map stage.  On phones and on the Change and
+   Explain pages the legend sits in the page instead (variant "inline"). */
+.vx-legend {
+  position: absolute;
+  z-index: 900;
+  left: 12px;
+  bottom: 12px;
+  width: min(248px, calc(100% - 24px));
+  border-radius: 22px;
+}
+.vx-legend__body {
+  padding: 12px 14px;
+}
+.vx-legend__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 0 14px;
+}
+.vx-legend__head + .vx-legend__body {
+  padding-top: 0;
+}
+.vx-legend--chip {
+  width: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--vx-text);
+  cursor: pointer;
+}
+.vx-legend__chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px 0 16px;
+}
+.vx-legend--inline {
+  position: static;
+  width: auto;
+  border-radius: 18px;
+  box-shadow: none;
+}
+.vx-hint {
+  position: absolute;
+  z-index: 900;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  border-radius: 999px;
+  font-size: 12.5px;
+}
+.vx-hint > .lg-c {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+}
+
+/* sr-only fallback is in Tailwind; reduced transparency */
+@media (prefers-contrast: more) {
+  :root {
+    --vx-border: rgba(255, 255, 255, 0.5);
+    --vx-text-muted: #e4e9f1;
+  }
+}

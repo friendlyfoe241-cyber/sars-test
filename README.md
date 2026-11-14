@@ -1,2 +1,121 @@
-# sars test
-testing of dancing with sars
+# NISAR Surface Change
+
+*Dancing with the SARs — NASA Space Apps Challenge 2026*
+
+A web application for investigating surface change on Earth with NASA–ISRO
+NISAR SAR data. Pick any place on the globe, discover the real NISAR L2 GCOV
+observations covering it, compare compatible acquisition pairs, run the
+scientific change analysis on calibrated measurements, and export the results.
+
+Two layers:
+
+- **Web app** (React + TypeScript + Leaflet): map, discovery, pairing,
+  before/after/change comparison, statistics, charts, exports and the Gemini
+  "Explain this change" feature (`api/explain-change.ts`).
+- **Processing pipeline** (Python, `processing/nisar_change`): catalogue
+  discovery, pair selection, authenticated retrieval of calibrated GCOV data
+  via NASA Harmony, dB calibration, change classification and area
+  calculations. Exposed to the app through `processing/serve.py` (a small
+  local JSON API) and as a CLI.
+
+---
+
+## Quick start
+
+```bash
+npm install
+npm run dev            # web app on http://localhost:5173
+```
+
+For the full experience (Gemini endpoint), run with the Vercel CLI:
+`vercel dev`. The app is usable without any server: discovery and the
+quicklook comparison need no credentials. The prepared demonstration dataset
+(Tonj floodplain wetlands, South Sudan) is available from the *Example* button.
+
+## Calibrated analysis (Python pipeline)
+
+```bash
+python3 -m venv .venv-py && .venv-py/bin/pip install -r processing/requirements.txt
+
+# credentials: create .env.local (git-ignored) with
+#   NASA_EARTHDATA_BEARER_TOKEN=your_token_here
+# or export NASA_EARTHDATA_BEARER_TOKEN in the shell.
+
+.venv-py/bin/python processing/serve.py        # analysis API on :8788
+```
+
+Then open the web app and press **Run calibrated analysis** in the Explain
+step. The pipeline searches the ASF catalogue, selects a compatible pair,
+subsets both acquisitions through NASA Harmony to the area of interest,
+converts linear power to dB, classifies change and computes area estimates.
+Downloads are cached under `processing/cache/`; results (CSV, JSON, GeoTIFF)
+under `processing/out/<id>/`.
+
+CLI equivalent:
+
+```bash
+cd processing && ../.venv-py/bin/python -m nisar_change \
+  --bbox 28.4 7.5 28.7 7.8 --event deforestation \
+  --before 2026-10-25 --after 2026-11-06 --pol HV --out out/
+```
+
+Tests: `cd processing && ../.venv-py/bin/python -m pytest tests/`
+and `node scripts/test-api.mjs` for the Gemini endpoint.
+
+## Live mode vs prepared demonstration
+
+| Mode | Data | Label in the UI |
+|---|---|---|
+| Live discovery | ASF Search API, current catalogue (metadata, footprints, quicklooks) | NISAR data · quicklook |
+| Live calibrated analysis | NASA Harmony subsets of NISAR L2 GCOV (needs the token) | live · calibrated |
+| Prepared demonstration | `public/data/manifest.json` (prepared example pair) | labelled per its manifest |
+
+The application never silently falls back to the prepared dataset when a live
+request fails; it reports the error and keeps the modes visibly distinct.
+
+## Event analysis methods
+
+| Event | Status | Method |
+|---|---|---|
+| Deforestation / vegetation disturbance | **Implemented** | HV/HH backscatter change (dB) with a documented threshold; candidate-disturbance area estimates |
+| Flood | Not implemented | needs permanent-water/terrain masks and a seasonal baseline (`processing/nisar_change/events.py` states the requirements) |
+| Earthquake deformation | Not implemented | needs interferometric products; backscatter differencing cannot measure displacement |
+
+Backscatter change is not proof of a cause: outputs are labelled **candidate
+disturbance** and carry explicit limitations.
+
+## Environment variables
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `NASA_EARTHDATA_BEARER_TOKEN` | Python pipeline (env or `.env.local`) | authenticated NISAR retrieval via NASA Harmony |
+| `GEMINI_API_KEY` | Vercel/server | Gemini "Explain this change" (server-side only) |
+| `GEMINI_MODEL` | Vercel/server | optional, default `gemini-2.5-flash` |
+| `VITE_ANALYSIS_API` | build time | analysis API base URL (default `http://127.0.0.1:8788`) |
+
+No Supabase or database is used; no SQL setup is necessary. Never commit
+`.env.local`, never use a `VITE_` prefix for secrets.
+
+## Deployment
+
+- **Web app + Gemini**: import the repository in Vercel (Vite preset); set
+  `GEMINI_API_KEY` in project settings.
+- **Analysis pipeline**: runs as a worker (`processing/serve.py`) on any
+  server or locally; set `NASA_EARTHDATA_BEARER_TOKEN` as a server-side
+  secret in its environment and point `VITE_ANALYSIS_API` at it when
+  building the frontend. Serverless functions are not suitable for Harmony
+  jobs (minutes-long, large downloads); keep the pipeline as a worker.
+
+## Known limitations
+
+- Quicklook comparisons (no pipeline) use ASF browse renderings in display
+  DN: the *sign* of change is meaningful, the magnitude is not calibrated
+  backscatter. Only the Python pipeline produces calibrated dB statistics.
+- Only NISAR L2 GCOV products are supported (L-band; HH/HV or VV/VH where
+  acquired). Both polarisation channels may not exist in every product.
+- The change threshold (default 3 dB) is a documented starting point, not a
+  validated value; speckle is not filtered; candidate areas are
+  threshold-dependent estimates and are not ground truth.
+- Single before/after pairs cannot separate deforestation from soil-moisture,
+  seasonal, flooding or wind effects. Validation against independent
+  reference data is required before drawing conclusions.
