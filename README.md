@@ -90,7 +90,7 @@ disturbance** and carry explicit limitations.
 |---|---|---|
 | `NASA_EARTHDATA_BEARER_TOKEN` | Python pipeline (env or `.env.local`) | authenticated NISAR retrieval via NASA Harmony |
 | `GEMINI_API_KEY` | Vercel/server | Gemini "Explain this change" (server-side only) |
-| `GEMINI_MODEL` | Vercel/server | optional, default `gemini-2.5-flash` |
+| `GEMINI_MODEL` | Vercel/server | optional, default `gemini-3-flash-preview` (auto-falls back to `gemini-3.1-flash-lite` if a model id is retired) |
 | `VITE_ANALYSIS_API` | build time | analysis API base URL (default `http://127.0.0.1:8788`) |
 
 No Supabase or database is used; no SQL setup is necessary. Never commit

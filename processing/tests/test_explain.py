@@ -89,7 +89,7 @@ def test_round_trip_with_analysis_facts(gemini, api_server):
     assert exp["recommendedNextInvestigation"]
     prompt = json.dumps(GeminiStub.captured["body"]["contents"])
     assert "candidateChangedAreaKm2" in prompt and "meanChangeDb" in prompt
-    assert GeminiStub.captured["url"].endswith("/models/gemini-2.5-flash:generateContent?key=test-key")
+    assert GeminiStub.captured["url"].endswith("/models/gemini-3-flash-preview:generateContent?key=test-key")
 
 
 def test_missing_key_503(api_server, monkeypatch):
@@ -108,6 +108,96 @@ def test_invalid_body_400(api_server):
 def test_get_rejected(api_server):
     res = requests.get(f"{api_server}/api/explain-change", timeout=10)
     assert res.status_code == 404  # only POST is routed
+
+
+SUCCESS_REPLY = json.dumps({"candidates": [{"content": {"parts": [{"text": json.dumps({
+    "observed_signal": "Signal recorded.",
+    "possible_interpretation": "Could indicate change.",
+    "supporting_evidence": "Numbers as provided.",
+    "limitations": "Cause unknown.",
+    "recommended_next_investigation": "Collect reference data.",
+})}]}}]})
+
+
+class FallbackStub(BaseHTTPRequestHandler):
+    """404 for a retired model id, success otherwise."""
+
+    captured_urls: list = []
+
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        FallbackStub.captured_urls.append(self.path)
+        if "retired-model" in self.path:
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": {
+                "code": 404,
+                "message": "This model models/retired-model is no longer available.",
+                "status": "NOT_FOUND",
+            }}).encode())
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(SUCCESS_REPLY.encode())
+
+
+class RejectStub(BaseHTTPRequestHandler):
+    """403 with a provider error message."""
+
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"error": {
+            "code": 403, "message": "API key not valid. Please pass a valid API key.",
+            "status": "PERMISSION_DENIED",
+        }}).encode())
+
+
+def _stub_server(monkeypatch, stub):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), stub)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("GEMINI_API_BASE", f"http://127.0.0.1:{server.server_address[1]}/v1beta")
+    return server
+
+
+def test_retired_model_falls_back(api_server, monkeypatch):
+    FallbackStub.captured_urls = []
+    server = _stub_server(monkeypatch, FallbackStub)
+    monkeypatch.setenv("GEMINI_MODEL", "retired-model")
+    try:
+        res = requests.post(f"{api_server}/api/explain-change", json=VALID_BODY, timeout=10)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert res.status_code == 200
+    assert res.json()["model"] == "gemini-3-flash-preview"
+    assert len(FallbackStub.captured_urls) == 2  # retired id first, then the fallback
+
+
+def test_key_rejection_surfaces_provider_detail(api_server, monkeypatch):
+    server = _stub_server(monkeypatch, RejectStub)
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    try:
+        res = requests.post(f"{api_server}/api/explain-change", json=VALID_BODY, timeout=10)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert res.status_code == 502
+    message = res.json()["error"]["message"]
+    assert "rejected" in message
+    assert "API key not valid" in message  # the provider's own detail is passed through
 
 
 def test_prompt_never_contains_secrets(gemini):

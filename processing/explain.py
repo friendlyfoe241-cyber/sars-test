@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -123,6 +124,46 @@ def _facts(body: dict) -> dict:
     }
 
 
+DEFAULT_MODEL = "gemini-3-flash-preview"
+FALLBACK_MODELS = ("gemini-3-flash-preview", "gemini-3.1-flash-lite")
+
+
+def _model_candidates() -> list:
+    """Configured model first, then known-current fallbacks (retired ids 404)."""
+    seen, out = set(), []
+    for m in (os.environ.get("GEMINI_MODEL", "").strip() or DEFAULT_MODEL, *FALLBACK_MODELS):
+        if m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
+def _error_detail(exc) -> str:
+    try:
+        body = json.loads(exc.read() or b"{}")
+        return str(body.get("error", {}).get("message", ""))[:300]
+    except Exception:
+        return ""
+
+
+def _service_error(status: int, detail: str) -> ExplainError:
+    suffix = f" {detail}" if detail else ""
+    if status in (401, 403):
+        return ExplainError(502, f"The Gemini API key was rejected (HTTP {status}). "
+                                 f"Check the server's GEMINI_API_KEY.{suffix}")
+    if status == 429:
+        return ExplainError(502, f"The Gemini API quota is exhausted (HTTP 429). "
+                                 f"Try again later.{suffix}")
+    return ExplainError(502, f"The explanation service returned an error (HTTP {status}).{suffix}")
+
+
+def _strip_fences(text: str) -> str:
+    """Tolerate models that wrap JSON in markdown fences despite responseMimeType."""
+    trimmed = text.strip()
+    match = re.match(r"^```(?:json)?\s*([\s\S]*?)\s*```$", trimmed, re.IGNORECASE)
+    return match.group(1) if match else trimmed
+
+
 def explain(body: dict) -> dict:
     """Run one Gemini call; returns {"explanation": {...}, "model": ...}."""
     if not isinstance(body, dict):
@@ -137,34 +178,59 @@ def explain(body: dict) -> dict:
         raise ExplainError(503, "GEMINI_API_KEY is not configured on the server.")
     base = os.environ.get("GEMINI_API_BASE",
                           "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
     payload = json.dumps({
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": json.dumps(_facts(body), indent=2)}]}],
         "generationConfig": {
+            # Thinking models count their reasoning toward the output budget;
+            # a too-small budget truncates the JSON mid-string.
             "temperature": 0.3,
-            "maxOutputTokens": 600,
+            "maxOutputTokens": 2048,
             "responseMimeType": "application/json",
             "responseSchema": RESPONSE_SCHEMA,
         },
     }).encode()
-    request = urllib.request.Request(
-        f"{base}/models/{model}:generateContent?key={api_key}",
-        data=payload, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=25) as res:
-            reply = json.loads(res.read())
-    except (urllib.error.URLError, TimeoutError, ValueError):
-        raise ExplainError(502, "The explanation service could not be reached.")
 
-    text = (((reply.get("candidates") or [{}])[0].get("content") or {})
-            .get("parts") or [{}])[0].get("text")
+    last_status, last_detail = 0, ""
+    reply, model = None, None
+    for candidate in _model_candidates():
+        request = urllib.request.Request(
+            f"{base}/models/{candidate}:generateContent?key={api_key}",
+            data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=25) as res:
+                reply = json.loads(res.read())
+            model = candidate
+            break
+        except urllib.error.HTTPError as exc:
+            detail = _error_detail(exc)
+            if exc.code == 404:
+                # Retired or unknown model id: try the next candidate.
+                last_status, last_detail = exc.code, detail
+                continue
+            raise _service_error(exc.code, detail)
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            raise ExplainError(502, "The explanation service could not be reached.")
+    if reply is None:
+        raise _service_error(last_status or 404, last_detail)
+
+    text = ""
+    finish_reason = ""
+    candidates = reply.get("candidates") or []
+    if candidates:
+        finish_reason = candidates[0].get("finishReason", "")
+        parts = (candidates[0].get("content") or {}).get("parts") or []
+        if parts:
+            text = parts[0].get("text", "") or ""
     if not text:
         raise ExplainError(502, "The explanation service returned an empty response.")
     try:
-        obj = json.loads(text)
+        obj = json.loads(_strip_fences(text))
     except ValueError:
+        if finish_reason == "MAX_TOKENS":
+            raise ExplainError(502, "The explanation was cut off by the model's response "
+                                   "budget; try again.")
         raise ExplainError(502, "The explanation service returned an unreadable response.")
 
     def pick(key):

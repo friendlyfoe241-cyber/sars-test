@@ -33,7 +33,16 @@ function apiBase(): string {
 }
 
 function model(): string {
-  return process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  return process.env.GEMINI_MODEL || "gemini-3-flash-preview";
+}
+
+/**
+ * The configured model first, then known-current fallbacks.  Google retires
+ * model ids over time (a retired id answers 404); failing over keeps the
+ * feature working without a redeploy while GEMINI_MODEL can still pin one.
+ */
+function modelCandidates(): string[] {
+  return [...new Set([model(), "gemini-3-flash-preview", "gemini-3.1-flash-lite"])];
 }
 
 function str(value: unknown, cap = 200): string | null {
@@ -145,7 +154,7 @@ Hard rules:
 - If the data are insufficient to interpret, say so in "observed_signal" and keep the other fields brief.
 - Do not add greetings, headings, caveats beyond the requested fields, or markdown.`;
 
-async function callGemini(prompt: string): Promise<Explanation> {
+async function callGemini(prompt: string): Promise<{ explanation: Explanation; model: string }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw Object.assign(new Error("GEMINI_API_KEY is not configured on the server."), {
@@ -153,85 +162,143 @@ async function callGemini(prompt: string): Promise<Explanation> {
     });
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 25000);
-  let res: Response;
-  try {
-    res = await fetch(
-      `${apiBase()}/models/${model()}:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 600,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "object",
-              properties: {
-                observed_signal: { type: "string" },
-                possible_interpretation: { type: "string" },
-                supporting_evidence: { type: "string" },
-                limitations: { type: "string" },
-                recommended_next_investigation: { type: "string" },
+  let lastStatus = 0;
+  let lastDetail = "";
+  for (const candidate of modelCandidates()) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    let res: Response;
+    try {
+      res = await fetch(
+        `${apiBase()}/models/${candidate}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+              // Thinking models count their reasoning toward the output
+              // budget; a too-small budget truncates the JSON mid-string.
+              temperature: 0.3,
+              maxOutputTokens: 2048,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "object",
+                properties: {
+                  observed_signal: { type: "string" },
+                  possible_interpretation: { type: "string" },
+                  supporting_evidence: { type: "string" },
+                  limitations: { type: "string" },
+                  recommended_next_investigation: { type: "string" },
+                },
+                required: [
+                  "observed_signal",
+                  "possible_interpretation",
+                  "supporting_evidence",
+                  "limitations",
+                  "recommended_next_investigation",
+                ],
               },
-              required: [
-                "observed_signal",
-                "possible_interpretation",
-                "supporting_evidence",
-                "limitations",
-                "recommended_next_investigation",
-              ],
             },
-          },
-        }),
-      },
-    );
-  } catch {
-    throw Object.assign(new Error("The explanation service could not be reached."), {
-      status: 502,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+          }),
+        },
+      );
+    } catch {
+      throw Object.assign(new Error("The explanation service could not be reached."), {
+        status: 502,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
-  if (!res.ok) {
-    throw Object.assign(
-      new Error(`The explanation service returned an error (HTTP ${res.status}).`),
+    if (!res.ok) {
+      const detail = await geminiErrorMessage(res);
+      if (res.status === 404) {
+        // Retired or unknown model id: try the next candidate.
+        lastStatus = res.status;
+        lastDetail = detail;
+        continue;
+      }
+      throw serviceError(res.status, detail);
+    }
+
+    const payload = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+    };
+    const candidate0 = payload.candidates?.[0];
+    const text = candidate0?.content?.parts?.[0]?.text;
+    if (!text) {
+      throw Object.assign(new Error("The explanation service returned an empty response."), {
+        status: 502,
+      });
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripFences(text));
+    } catch {
+      if (candidate0?.finishReason === "MAX_TOKENS") {
+        throw Object.assign(
+          new Error("The explanation was cut off by the model's response budget; try again."),
+          { status: 502 },
+        );
+      }
+      throw Object.assign(new Error("The explanation service returned an unreadable response."), {
+        status: 502,
+      });
+    }
+    const obj = parsed as Record<string, unknown>;
+    return {
+      explanation: {
+        observedSignal: str(obj.observed_signal, MAX_TEXT) ?? "",
+        possibleIndication: str(obj.possible_interpretation, MAX_TEXT) ?? "",
+        supportingEvidence: str(obj.supporting_evidence, MAX_TEXT) ?? "",
+        limitations: str(obj.limitations, MAX_TEXT) ?? "",
+        recommendedNextInvestigation: str(obj.recommended_next_investigation, MAX_TEXT) ?? "",
+      },
+      model: candidate,
+    };
+  }
+  throw serviceError(lastStatus || 404, lastDetail);
+}
+
+/** The provider's own error message, kept short and generic-safe. */
+async function geminiErrorMessage(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: { message?: unknown } };
+    return typeof body.error?.message === "string" ? body.error.message.slice(0, 300) : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Tolerate models that wrap JSON in markdown fences despite responseMimeType. */
+function stripFences(text: string): string {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  return fenced ? fenced[1] : trimmed;
+}
+
+function serviceError(status: number, detail: string): Error {
+  const suffix = detail ? ` ${detail}` : "";
+  if (status === 401 || status === 403) {
+    return Object.assign(
+      new Error(`The Gemini API key was rejected (HTTP ${status}). Check the server's GEMINI_API_KEY.${suffix}`),
       { status: 502 },
     );
   }
-
-  const payload = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-  const text = payload.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw Object.assign(new Error("The explanation service returned an empty response."), {
-      status: 502,
-    });
+  if (status === 429) {
+    return Object.assign(
+      new Error(`The Gemini API quota is exhausted (HTTP 429). Try again later.${suffix}`),
+      { status: 502 },
+    );
   }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw Object.assign(new Error("The explanation service returned an unreadable response."), {
-      status: 502,
-    });
-  }
-  const obj = parsed as Record<string, unknown>;
-  return {
-    observedSignal: str(obj.observed_signal, MAX_TEXT) ?? "",
-    possibleIndication: str(obj.possible_interpretation, MAX_TEXT) ?? "",
-    supportingEvidence: str(obj.supporting_evidence, MAX_TEXT) ?? "",
-    limitations: str(obj.limitations, MAX_TEXT) ?? "",
-    recommendedNextInvestigation: str(obj.recommended_next_investigation, MAX_TEXT) ?? "",
-  };
+  return Object.assign(
+    new Error(`The explanation service returned an error (HTTP ${status}).${suffix}`),
+    { status: 502 },
+  );
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -248,8 +315,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const explanation = await callGemini(prompt);
-    res.status(200).json({ explanation, model: model() });
+    const { explanation, model: usedModel } = await callGemini(prompt);
+    res.status(200).json({ explanation, model: usedModel });
   } catch (err) {
     const status = (err as { status?: number }).status ?? 500;
     const message =
