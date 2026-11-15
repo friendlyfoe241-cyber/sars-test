@@ -107,12 +107,14 @@ def _select_layer_file(paths: list[Path], pol: str) -> Path:
 
 
 def retrieve_subset(granule: Granule, bbox, pol: str, cache_dir: Path, cmr_info: dict, *,
-                    timeout_s: int = 1800, poll_s: float = 10.0, client=None) -> tuple[Path, dict]:
+                    timeout_s: int = 1800, poll_s: float = 10.0, client=None,
+                    on_progress=None) -> tuple[Path, dict]:
     """Submit a Harmony bbox+variable subset job and download the GeoTIFF.
 
     Returns (path_to_geotiff, info).  Handles asynchronous jobs (polling with
     back-off and an overall timeout), transient errors/rate limits (retries) and
-    rejected variable names (tries the next candidate).
+    rejected variable names (tries the next candidate).  `on_progress`, if
+    given, is called with Harmony's reported percent complete (or None).
     """
     try:
         from harmony import BBox, Collection, Request
@@ -167,6 +169,12 @@ def retrieve_subset(granule: Granule, bbox, pol: str, cache_dir: Path, cmr_info:
     while True:
         status = _retry(lambda: client.status(job_id))
         state = str(status.get("status", "")).lower()
+        if on_progress is not None:
+            try:
+                pct = status.get("progress")
+                on_progress(int(pct) if pct is not None else None)
+            except Exception:
+                pass
         if state == "successful":
             break
         if state in TERMINAL_FAIL:

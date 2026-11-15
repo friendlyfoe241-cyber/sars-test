@@ -75,7 +75,8 @@ def write_change_map(result: ChangeResult, grid: Raster, out_dir: Path) -> Path:
     except ImportError as exc:  # pragma: no cover
         raise MissingDependencyError(
             "rasterio is required to write the GeoTIFF change map (pip install rasterio)") from exc
-    cls = np.where(result.valid, result.changed.astype(np.float32), np.nan).astype(np.float32)
+    cls = result.changed.astype(np.float32)
+    cls[~result.valid] = np.nan
     bands = [("before_db", result.before_db), ("after_db", result.after_db),
              ("difference_db", result.diff_db), ("classified_changed", cls)]
     path = out_dir / "change_map.tif"
@@ -83,7 +84,7 @@ def write_change_map(result: ChangeResult, grid: Raster, out_dir: Path) -> Path:
                        count=4, dtype="float32", crs=grid.crs_wkt,
                        transform=Affine(*grid.transform), nodata=np.nan, compress="deflate") as ds:
         for i, (name, arr) in enumerate(bands, start=1):
-            ds.write(arr.astype(np.float32), i)
+            ds.write(np.asarray(arr, dtype=np.float32), i)
             ds.set_band_description(i, name)
     return path
 

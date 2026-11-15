@@ -107,14 +107,19 @@ def _run(job: Job) -> None:
         return discovery.cmr_lookup(granule)
 
     def retrieve(granule, bbox, pol, cache, cmr_info):
-        stage(f"retrieving calibrated {pol} data from NASA Harmony")
         from nisar_change import retrieval
-        return retrieval.retrieve_subset(granule, bbox, pol, cache, cmr_info)
 
-    def reader(path, units):
+        def prog(pct):
+            suffix = f" — Harmony reports {pct}% complete" if pct is not None else "…"
+            stage(f"retrieving calibrated {pol} data from NASA Harmony{suffix}")
+
+        stage(f"retrieving calibrated {pol} data from NASA Harmony…")
+        return retrieval.retrieve_subset(granule, bbox, pol, cache, cmr_info, on_progress=prog)
+
+    def reader(path, units, decimate=1):
         stage("processing measurements")
         from nisar_change import raster
-        return raster.read_geotiff(path, units)
+        return raster.read_geotiff(path, units, decimate=decimate)
 
     try:
         run = run_analysis(req, job.out_dir, cache_dir=CACHE_DIR, pixel_csv_max=20000,
@@ -209,8 +214,11 @@ class Handler(BaseHTTPRequestHandler):
         if parts[:2] == ["api", "analyze"] and len(parts) == 3:
             with JOBS_LOCK:
                 job = JOBS.get(parts[2])
-            self._send(200 if job else 404, job.view() if job else
-                       {"error": {"code": 404, "message": "unknown analysisId"}})
+            self._send(200 if job else 404, job.view() if job else {"error": {
+                "code": "worker_restarted",
+                "message": ("This analysis is no longer known to the analysis service — the "
+                            "worker restarted (e.g. after running out of memory) while it was "
+                            "running. Run the analysis again.")}})
             return
         if parts[:2] == ["api", "artifacts"] and len(parts) == 3:
             self._serve_artifact(parts[2], "")

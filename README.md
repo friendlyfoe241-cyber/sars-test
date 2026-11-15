@@ -91,10 +91,24 @@ disturbance** and carry explicit limitations.
 | `NASA_EARTHDATA_BEARER_TOKEN` | Python pipeline (env or `.env.local`) | authenticated NISAR retrieval via NASA Harmony |
 | `GEMINI_API_KEY` | Vercel/server | Gemini "Explain this change" (server-side only) |
 | `GEMINI_MODEL` | Vercel/server | optional, default `gemini-3-flash-preview` (auto-falls back to `gemini-3.1-flash-lite` if a model id is retired) |
-| `VITE_ANALYSIS_API` | build time | analysis API base URL (default `http://127.0.0.1:8788`) |
+| `VITE_ANALYSIS_API` | build time | analysis worker URL for a cross-origin worker (default: same origin; dev uses the Vite proxy to `127.0.0.1:8788`) |
+| `NISAR_MAX_ANALYSIS_PIXELS` | Python worker | optional, default `6000000`; larger areas are analysed on a subsampled grid (see below) |
 
 No Supabase or database is used; no SQL setup is necessary. Never commit
 `.env.local`, never use a `VITE_` prefix for secrets.
+
+### Analysis size and memory
+
+The worker keeps its peak memory bounded (verified ≈ 310 MB for a 100 × 100 km
+AOI, including the full 20 m GCOV downloads) so it fits small instances such
+as Render's 512 MB services.  When the requested area exceeds
+`NISAR_MAX_ANALYSIS_PIXELS` at the product resolution (a 100 × 100 km AOI at
+20 m is 25M pixels), the analysis runs on **every k-th pixel — an exact
+subsample, values untouched, no smoothing** — and the result reports the
+factor and the actual analysis pixel size in
+`processing.analysisGridDecimation`.  Candidate-area estimates are computed
+from the analysis grid's true pixel areas and remain threshold-dependent
+estimates.
 
 ## Deployment
 

@@ -8,10 +8,17 @@ be used and tested without it.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+# GDAL defaults its block cache to a share of *physical* RAM, which on a
+# container (Render, Docker) can be far larger than the container's own limit.
+# 32 MB is plenty for the windowed reads/writes this package performs.
+os.environ.setdefault("GDAL_CACHEMAX", "32")
+os.environ.setdefault("GDAL_NUM_THREADS", "1")
 
 from .errors import IncompatibleDataError, MissingDependencyError
 
@@ -96,16 +103,69 @@ class Raster:
         }
 
 
-def read_geotiff(path: str | Path, units: str = "linear", band: int = 1) -> Raster:
-    """Load band `band` of a GeoTIFF as float32 (nodata -> NaN)."""
+def decimation_factor(n_pixels: int, max_pixels: int) -> int:
+    """Integer subsampling factor that brings `n_pixels` within `max_pixels`.
+
+    The grid is subsampled (every k-th pixel), never smoothed, so the
+    statistics of the remaining pixels are unbiased; only the resolution
+    changes and the analysis grid reports its actual pixel size.
+    """
+    if n_pixels <= max_pixels:
+        return 1
+    return math.ceil(math.sqrt(n_pixels / max_pixels))
+
+
+def decimate(raster: "Raster", factor: int) -> "Raster":
+    """Subsample to every `factor`-th pixel (nearest, no smoothing).
+
+    The transform is scaled so the sampled pixels keep their true map
+    positions; values are untouched (exact subset of the original pixels).
+    """
+    if factor <= 1:
+        return raster
+    # .copy() matters: the strided slice would keep the full base array alive
+    data = raster.data[::factor, ::factor].copy()
+    a, b, c, d, e, f = raster.transform
+    transform = (a * factor, b * factor, c, d * factor, e * factor, f)
+    return Raster(data, transform, raster.crs_wkt, raster.is_geographic,
+                  raster.meters_per_unit, raster.units, raster.source)
+
+
+def peek_pixels(path: str | Path) -> int:
+    """Pixel count of a raster, from the header only (bounded memory)."""
+    with _rasterio().open(path) as ds:
+        return int(ds.height) * int(ds.width)
+
+
+def read_geotiff(path: str | Path, units: str = "linear", band: int = 1,
+                 decimate: int = 1) -> Raster:
+    """Load band `band` of a GeoTIFF as float32 (nodata -> NaN).
+
+    `decimate=k` keeps only every k-th row/column (exact product pixels, no
+    smoothing) and is read strip-by-strip so that memory stays bounded even
+    for very large files; the returned transform maps the subsampled grid.
+    """
     rio = _rasterio()
+    k = max(1, int(decimate))
     with rio.open(path) as ds:
         if ds.crs is None:
             raise IncompatibleDataError(f"{path} has no coordinate reference system")
         t = ds.transform
         if abs(t.b) > 1e-12 or abs(t.d) > 1e-12:
             raise IncompatibleDataError(f"{path} has a rotated geotransform, which is not supported")
-        data = ds.read(band).astype("float32")
+        if k == 1:
+            data = ds.read(band).astype("float32", copy=False)
+        else:
+            rows_out = len(range(0, ds.height, k))
+            cols_out = len(range(0, ds.width, k))
+            data = np.empty((rows_out, cols_out), dtype="float32")
+            strip = max(1, (1_000_000 // max(ds.width, 1)) // k) * k  # ~1M source px per strip
+            for r0 in range(0, ds.height, strip):
+                r1 = min(ds.height, r0 + strip)
+                block = ds.read(band, window=((r0, r1), (0, ds.width))).astype("float32", copy=False)
+                sub = block[::k, ::k]
+                data[r0 // k: r0 // k + sub.shape[0], :] = sub
+                del block, sub
         if ds.nodata is not None and np.isfinite(ds.nodata):
             data[data == np.float32(ds.nodata)] = np.nan
         data[~np.isfinite(data)] = np.nan
@@ -116,7 +176,10 @@ def read_geotiff(path: str | Path, units: str = "linear", band: int = 1) -> Rast
                 factor = float(ds.crs.linear_units_factor[1])
             except Exception:
                 factor = 1.0
-        return Raster(data, (t.a, t.b, t.c, t.d, t.e, t.f), ds.crs.to_wkt(), geographic,
+        transform = (t.a, t.b, t.c, t.d, t.e, t.f)
+        if k > 1:
+            transform = (t.a * k, t.b * k, t.c, t.d * k, t.e * k, t.f)
+        return Raster(data, transform, ds.crs.to_wkt(), geographic,
                       factor, units, str(path))
 
 
@@ -167,13 +230,17 @@ def _overlap(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def to_db(raster: Raster, units: str, db_min: float, db_max: float) -> np.ndarray:
-    """Backscatter in dB with invalid pixels as NaN.
+    """Backscatter in dB (float32) with invalid pixels as NaN.
 
     linear input: non-positive values are invalid (log undefined); a negative
     value means the data are probably not linear power, which is an error.
     Any dB value outside [db_min, db_max] is treated as invalid.
+
+    The conversion runs in-place on one float32 buffer (dB is ~7 significant
+    digits in float32, far beyond the reported precision) so that the peak
+    memory of the pipeline stays low on small hosts.
     """
-    data = raster.data.astype(np.float64)
+    data = np.array(raster.data, dtype=np.float32, copy=True)
     if units == "linear":
         finite = data[np.isfinite(data)]
         if finite.size and (finite < 0).any():
@@ -181,12 +248,15 @@ def to_db(raster: Raster, units: str, db_min: float, db_max: float) -> np.ndarra
                 f"{raster.source or 'raster'} contains negative values but input_units is "
                 "'linear' (power cannot be negative). The data may already be in dB - "
                 "re-run with input_units='db'.")
+        del finite
+        # non-positive (and NaN) cannot be logged; mark them before the log
+        # so the mask is about the linear values, not the dB result
+        data[~(data > 0)] = np.nan
         with np.errstate(divide="ignore", invalid="ignore"):
-            db = np.where(data > 0, 10.0 * np.log10(np.where(data > 0, data, 1.0)), np.nan)
-    elif units == "db":
-        db = data.copy()
-    else:
+            np.log10(data, out=data, where=~np.isnan(data))
+            data *= 10.0
+    elif units != "db":
         raise IncompatibleDataError(f"unknown units {units!r}")
-    db[~np.isfinite(db)] = np.nan
-    db[(db < db_min) | (db > db_max)] = np.nan
-    return db
+    data[~np.isfinite(data)] = np.nan
+    data[(data < db_min) | (data > db_max)] = np.nan
+    return data

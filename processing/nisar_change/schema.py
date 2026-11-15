@@ -92,6 +92,7 @@ def build_result(analysis_id: str, request: AnalysisRequest, run: RunResult,
             "unitsOfResults": method["units_of_results"],
             "alignment": method["alignment"],
             "analysisGrid": method["analysis_grid"],
+            "analysisGridDecimation": method.get("analysis_grid_decimation"),
             "quality": {
                 "validPixels": run.result.stats["valid_pixels"],
                 "validFraction": _finite(run.result.stats["valid_fraction"]),

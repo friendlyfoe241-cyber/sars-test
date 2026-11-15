@@ -118,7 +118,17 @@ export function analysisBase(): string {
 }
 
 async function jsonFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(`${BASE}${path}`, init);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, init);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new AnalysisError(
+      `The analysis service could not be reached${BASE ? ` at ${BASE}` : ""} (network error). ` +
+        "It may be starting up, asleep, or unreachable — press Retry in a moment.",
+      { error: { code: "unreachable" } },
+    );
+  }
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     const message =
@@ -171,8 +181,33 @@ export async function waitForAnalysis(
   onUpdate?: (job: AnalysisJob) => void,
   signal?: AbortSignal,
 ): Promise<AnalysisJob> {
+  let failures = 0;
   for (;;) {
-    const job = await getAnalysis(id, signal);
+    let job: AnalysisJob;
+    try {
+      job = await getAnalysis(id, signal);
+      failures = 0;
+    } catch (err) {
+      // Tolerate transient network blips (worker restarts, brief connection
+      // loss) before giving up; a job the worker has forgotten is reported
+      // immediately.
+      if (
+        (err instanceof AnalysisError && err.code !== "unreachable") ||
+        (err instanceof DOMException && err.name === "AbortError") ||
+        failures >= 4
+      ) {
+        throw err;
+      }
+      failures++;
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, 3000);
+        signal?.addEventListener("abort", () => {
+          clearTimeout(t);
+          reject(new DOMException("aborted", "AbortError"));
+        }, { once: true });
+      });
+      continue;
+    }
     onUpdate?.(job);
     if (job.status === "succeeded" || job.status === "failed") return job;
     await new Promise((resolve, reject) => {

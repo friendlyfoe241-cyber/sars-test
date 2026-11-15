@@ -127,6 +127,9 @@ def test_analyze_invalid_body_400(api_server):
 def test_unknown_analysis_404(api_server):
     res = requests.get(f"{api_server}/api/analyze/doesnotexist", timeout=10)
     assert res.status_code == 404
+    err = res.json()["error"]
+    assert err["code"] == "worker_restarted"
+    assert "Run the analysis again" in err["message"]
 
 
 def test_artifact_path_traversal_blocked(api_server):
